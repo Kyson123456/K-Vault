@@ -1,7 +1,8 @@
 /**
  * 全局中间件
  * 处理错误和遥测；末尾追加相册门锁：/album、/api/public/gallery 需要账号密码。
- * 账号密码复用管理后台的环境变量 BASIC_USER / BASIC_PASS（认证惯例见 /api/manage/_middleware.js）。
+ * 支持两套账号：管理后台账号（BASIC_USER / BASIC_PASS）+ 游客账号（ALBUM_GUEST_USER / ALBUM_GUEST_PASS）。
+ * 游客账号只能看相册，进不了管理后台（后台验证只认 BASIC_USER / BASIC_PASS）。
  */
 import { errorHandling, telemetryData } from './utils/middleware';
 
@@ -22,16 +23,22 @@ async function albumGate({ request, env, next }) {
     return next();
   }
 
-  const user = env.BASIC_USER || '';
-  const pass = env.BASIC_PASS || '';
-  if (!user || !pass) return needLogin();
+  // 多套账号：后台账号 + 游客账号；没配置的自动忽略
+  const accounts = [
+    [env.BASIC_USER, env.BASIC_PASS],
+    [env.ALBUM_GUEST_USER, env.ALBUM_GUEST_PASS],
+  ].filter(([u, p]) => u && p);
+
+  if (accounts.length === 0) return needLogin();
 
   const auth = request.headers.get('Authorization') || '';
   if (auth.startsWith('Basic ')) {
     try {
       const decoded = atob(auth.slice(6));
       const sep = decoded.indexOf(':');
-      if (decoded.slice(0, sep) === user && decoded.slice(sep + 1) === pass) {
+      const u = decoded.slice(0, sep);
+      const p = decoded.slice(sep + 1);
+      if (accounts.some(([user, pass]) => u === user && p === pass)) {
         return next();
       }
     } catch (e) {
